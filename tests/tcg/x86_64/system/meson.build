@@ -36,6 +36,10 @@ foreach t: tcg_tests['multiarch-softmmu']['tests']
 endforeach
 
 tests += {
+  'bt-flags.c': {
+    'cflags': cflags,
+    'qemu_args': qemu_def_args,
+  },
   'patch-target.c': {
     'cflags': cflags,
     'qemu_args': qemu_def_args,
