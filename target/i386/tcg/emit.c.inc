@@ -1445,38 +1445,28 @@ static TCGv gen_bt_mask(DisasContext *s, X86DecodedInsn *decode)
     return mask;
 }
 
-/* Expects truncated bit index in COUNT, 1 << COUNT in MASK.  */
+/* Expects 1 << COUNT in MASK, with COUNT already applied to SRC if needed.  */
 static void gen_bt_flags(DisasContext *s, X86DecodedInsn *decode, TCGv src,
-                         TCGv count, TCGv mask)
+                         TCGv mask)
 {
     TCGv cf;
 
     /*
-     * C is the result of the test, Z is unchanged, and the others
-     * are all undefined.
+     * C is the result of the test.  The SDM describes O, S, A and P as
+     * undefined, but real hardware leaves them untouched, and guests do rely
+     * on that: OpenVMS x86-64 restores a saved carry with BT and then saves
+     * the flag byte with LAHF, which includes A.
+     *
+     * Generate EFLAGS and replace only the C bit.  prepare_update_cf() copes
+     * with any incoming cc_op, materialising the flags where needed.
      */
-    if (s->cc_op == CC_OP_DYNAMIC || CC_OP_HAS_EFLAGS(s->cc_op)) {
-        /* Generate EFLAGS and replace the C bit.  */
-        cf = tcg_temp_new();
-        tcg_gen_setcond_tl(TCG_COND_TSTNE, cf, src, mask);
-        prepare_update_cf(decode, s, cf);
-    } else {
-        /*
-         * Z was going to be computed from the non-zero status of CC_DST.
-         * We can get that same Z value (and the new C value) by leaving
-         * CC_DST alone, setting CC_SRC, and using a CC_OP_SAR of the
-         * same width.
-         */
-        decode->cc_src = tcg_temp_new();
-        decode->cc_dst = cpu_cc_dst;
-        decode->cc_op = CC_OP_SARB + cc_op_size(s->cc_op);
-        tcg_gen_shr_tl(decode->cc_src, src, count);
-    }
+    cf = tcg_temp_new();
+    tcg_gen_setcond_tl(TCG_COND_TSTNE, cf, src, mask);
+    prepare_update_cf(decode, s, cf);
 }
 
 static void gen_BT(DisasContext *s, X86DecodedInsn *decode)
 {
-    TCGv count = s->T1;
     TCGv mask;
 
     /*
@@ -1494,10 +1484,9 @@ static void gen_BT(DisasContext *s, X86DecodedInsn *decode)
         tcg_gen_andi_tl(s->T1, s->T1, (8 << ot) - 1);
         tcg_gen_shr_tl(s->T0, s->T0, s->T1);
 
-        count = tcg_constant_tl(0);
         mask = tcg_constant_tl(1);
     }
-    gen_bt_flags(s, decode, s->T0, count, mask);
+    gen_bt_flags(s, decode, s->T0, mask);
 }
 
 static void gen_BTC(DisasContext *s, X86DecodedInsn *decode)
@@ -1513,7 +1502,7 @@ static void gen_BTC(DisasContext *s, X86DecodedInsn *decode)
         tcg_gen_xor_tl(s->T0, s->T0, mask);
     }
 
-    gen_bt_flags(s, decode, old, s->T1, mask);
+    gen_bt_flags(s, decode, old, mask);
 }
 
 static void gen_BTR(DisasContext *s, X86DecodedInsn *decode)
@@ -1531,7 +1520,7 @@ static void gen_BTR(DisasContext *s, X86DecodedInsn *decode)
         tcg_gen_andc_tl(s->T0, s->T0, mask);
     }
 
-    gen_bt_flags(s, decode, old, s->T1, mask);
+    gen_bt_flags(s, decode, old, mask);
 }
 
 static void gen_BTS(DisasContext *s, X86DecodedInsn *decode)
@@ -1547,7 +1536,7 @@ static void gen_BTS(DisasContext *s, X86DecodedInsn *decode)
         tcg_gen_or_tl(s->T0, s->T0, mask);
     }
 
-    gen_bt_flags(s, decode, old, s->T1, mask);
+    gen_bt_flags(s, decode, old, mask);
 }
 
 static void gen_BZHI(DisasContext *s, X86DecodedInsn *decode)
